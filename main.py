@@ -1,75 +1,85 @@
-import pygame
-import sys
+import argparse
+import os
+import json
 
-from logger import log_event, log_state
+from dotenv import load_dotenv
+from openai import OpenAI
 
-
-from constants import SCREEN_HEIGHT, SCREEN_WIDTH
-from logger import log_state
-from player import Player
-from asteroid import Asteroid
-from asteroidfield import AsteroidField
-from shot import Shot
+from prompts import system_prompt
+from call_function import available_functions, call_function
 
 
-def main():
-    pygame.init()
-
-    clock = pygame.time.Clock()
-    dt = 0.0
-
-# ...set up the screen...
-
-    print(f"Starting Asteroids with pygame version: {pygame.version.ver}")
-    print(f"Screen width: {SCREEN_WIDTH}")
-    print(f"Screen height: {SCREEN_HEIGHT}")
-
-    updatable = pygame.sprite.Group()
-    drawable = pygame.sprite.Group()
-    asteroids = pygame.sprite.Group()
-    shots = pygame.sprite.Group()
-
-    Player.containers = (updatable, drawable)
-    Asteroid.containers = (asteroids, updatable, drawable)
-    AsteroidField.containers = updatable
-    Shot.containers = (shots, updatable, drawable)
-
-    screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-    player = Player(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2)
-    asteroid_field = AsteroidField()
-
-    while True:
-        log_state()
-
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                return
-
-        updatable.update(dt)
-
-        for asteroid in asteroids:
-            if player.collides_with(asteroid):
-                log_event("player_hit")
-                print("Game over!")
-                sys.exit()
-
-        screen.fill("black")
-
-        for asteroid in list(asteroids):
-            for shot in list(shots):
-                if asteroid.collides_with(shot):
-                    log_event("asteroid_shot")
-                    asteroid.split()
-                    shot.kill()
-                    break
-
-        for obj in drawable:
-            obj.draw(screen)
-        pygame.display.flip()
+MAX_ITERATIONS = 20
 
 
-        dt = clock.tick(60) / 1000
+def main() -> None:
+    load_dotenv()
+
+    parser = argparse.ArgumentParser(
+        description="A simple AI coding agent."
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print function arguments and results",
+    )
+    parser.add_argument(
+        "user_prompt",
+        help="What should the agent do?",
+    )
+    args = parser.parse_args()
+
+    api_key = os.environ.get("OPENROUTER_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENROUTER_API_KEY is not set")
+
+    client = OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=api_key,
+    )
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": args.user_prompt},
+    ]
+
+    for _ in range(MAX_ITERATIONS):
+        response = client.chat.completions.create(
+            model="openrouter/free",
+            messages=messages,
+            tools=available_functions,
+        )
+
+        message = response.choices[0].message
+        messages.append(message)
+
+        if not message.tool_calls:
+            print(f"Final response:\n{message.content}")
+            return
+
+        for tool_call in message.tool_calls:
+            result_message = call_function(
+                tool_call,
+                verbose=args.verbose,
+            )
+
+            if not result_message.get("content"):
+                raise RuntimeError(
+                    f"Function {tool_call.function.name} returned no content"
+                )
+
+            messages.append(result_message)
+
+            if args.verbose:
+                print(f"-> {result_message['content']}")
+
+    print(
+        f"Error: Maximum number of iterations "
+        f"({MAX_ITERATIONS}) reached without a final response."
+    )
+    sys.exit(1)
 
 
 if __name__ == "__main__":
     main()
+

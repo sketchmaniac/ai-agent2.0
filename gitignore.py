@@ -1,1 +1,5 @@
-game_events.jsonl
+.env
+env.py
+.venv/
+__pycache__/
+*.py[cod]

@@ -10,3 +10,8 @@ wheels/
 .venv
 
 game_state.jsonl
+.env
+.env
+.env
+.env
+env.py
